@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>bloom</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #fafafa;
+      cursor: none;
+      transition: background 3s ease;
+    }
+
+    body.lush {
+      background: #f0f5f0;
+    }
+
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+    }
+
+    #garden {
+      z-index: 1;
+    }
+
+    #wind {
+      z-index: 2;
+      pointer-events: none;
+      opacity: 0.3;
+    }
+
+    /* Custom cursor - seed */
+    .cursor {
+      position: fixed;
+      pointer-events: none;
+      z-index: 1000;
+      transform: translate(-50%, -50%);
+      transition: transform 0.2s ease-out;
+    }
+
+    .cursor-seed {
+      width: 8px;
+      height: 8px;
+      background: radial-gradient(circle at 30% 30%, #5a4a3a, #2a2420);
+      border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .cursor.planting .cursor-seed {
+      transform: scale(0.5);
+      opacity: 0.5;
+    }
+
+    /* Pollen particles */
+    .pollen {
+      position: fixed;
+      width: 4px;
+      height: 4px;
+      background: radial-gradient(circle, rgba(255, 220, 100, 0.8), transparent);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    /* Growth indicator */
+    .growth-ring {
+      position: fixed;
+      border-radius: 50%;
+      border: 1px solid rgba(100, 150, 100, 0.3);
+      pointer-events: none;
+      animation: growthExpand 1s ease-out forwards;
+    }
+
+    @keyframes growthExpand {
+      0% {
+        width: 0;
+        height: 0;
+        opacity: 1;
+      }
+      100% {
+        width: 60px;
+        height: 60px;
+        opacity: 0;
+      }
+    }
+
+    /* Season indicator */
+    .season-glow {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      pointer-events: none;
+      transition: background 2s ease;
+    }
+
+    .season-glow.spring { background: radial-gradient(circle, #90EE90, transparent); }
+    .season-glow.summer { background: radial-gradient(circle, #FFD700, transparent); }
+    .season-glow.autumn { background: radial-gradient(circle, #CD853F, transparent); }
+    .season-glow.winter { background: radial-gradient(circle, #B0C4DE, transparent); }
+
+    /* Load animation */
+    .load-overlay {
+      position: fixed;
+      inset: 0;
+      background: #fafafa;
+      z-index: 10000;
+      animation: bloomFadeIn 2s ease-out forwards;
+      pointer-events: none;
+    }
+
+    @keyframes bloomFadeIn {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    @media (hover: none) {
+      .cursor {
+        display: none;
+      }
+      html, body {
+        cursor: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="load-overlay"></div>
+  
+  <canvas id="garden"></canvas>
+  <canvas id="wind"></canvas>
+  
+  <div class="cursor">
+    <div class="cursor-seed"></div>
+  </div>
+  
+  <div class="season-glow spring"></div>
+
+  <script>
+    // ============ CONFIGURATION ============
+    const CONFIG = {
+      maxPlants: 200,
+      growthSpeed: 0.02,
+      windStrength: 0.3,
+      pollenChance: 0.02,
+      seasonDuration: 30000, // 30 seconds per season
+    };
+
+    // ============ STATE ============
+    const state = {
+      plants: [],
+      pollen: [],
+      wind: { x: 0, y: 0 },
+      targetWind: { x: 0, y: 0 },
+      mouseX: 0,
+      mouseY: 0,
+      lastMouseX: 0,
+      lastMouseY: 0,
+      mouseSpeed: 0,
+      season: 'spring',
+      seasonTime: 0,
+      totalPlants: 0,
+      visits: 1,
+      lastVisit: Date.now(),
+      gardenAge: 0
+    };
+
+    // ============ CANVAS SETUP ============
+    const gardenCanvas = document.getElementById('garden');
+    const windCanvas = document.getElementById('wind');
+    const gardenCtx = gardenCanvas.getContext('2d');
+    const windCtx = windCanvas.getContext('2d');
+    const cursor = document.querySelector('.cursor');
+    const seasonGlow = document.querySelector('.season-glow');
+
+    function resize() {
+      gardenCanvas.width = windCanvas.width = window.innerWidth;
+      gardenCanvas.height = windCanvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ============ COLORS ============
+    const PALETTES = {
+      spring: {
+        stems: ['#4a7c4e', '#3d6b3f', '#5a8f5a'],
+        blooms: ['#ffb7c5', '#ff91a4', '#ffd1dc', '#fff0f5', '#e6a8d7'],
+        leaves: ['#7cb87c', '#90c090', '#a8d8a8']
+      },
+      summer: {
+        stems: ['#3d6b3f', '#2d5a2f', '#4a7a4a'],
+        blooms: ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff8e72'],
+        leaves: ['#228b22', '#32cd32', '#3cb371']
+      },
+      autumn: {
+        stems: ['#5d4037', '#6d4c41', '#4e342e'],
+        blooms: ['#ff7043', '#ffa726', '#ef5350', '#8d6e63', '#d4a574'],
+        leaves: ['#ff8a65', '#ffb74d', '#a1887f']
+      },
+      winter: {
+        stems: ['#546e7a', '#607d8b', '#78909c'],
+        blooms: ['#e0e0e0', '#b0bec5', '#cfd8dc', '#eceff1', '#a7c7e7'],
+        leaves: ['#90a4ae', '#b0bec5', '#cfd8dc']
+      }
+    };
+
+    function getColor(type) {
+      const palette = PALETTES[state.season];
+      const colors = palette[type];
+      return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    // ============ PLANT CLASS ============
+    class Plant {
+      constructor(x, y, dna = null) {
+        this.x = x;
+        this.y = y;
+        this.age = 0;
+        this.maxAge = 500 + Math.random() * 500;
+        this.growth = 0;
+        this.maxGrowth = 1;
+        this.branches = [];
+        this.blooms = [];
+        this.swayOffset = Math.random() * Math.PI * 2;
+        this.birthSeason = state.season;
+        
+        // DNA determines characteristics
+        this.dna = dna || {
+          height: 30 + Math.random() * 70,
+          spread: 0.3 + Math.random() * 0.5,
+          branchiness: Math.floor(2 + Math.random() * 4),
+          bloomSize: 3 + Math.random() * 8,
+          bloomCount: Math.floor(2 + Math.random() * 6),
+          curvature: (Math.random() - 0.5) * 0.3,
+          stemColor: getColor('stems'),
+          bloomColor: getColor('blooms'),
+          leafColor: getColor('leaves')
+        };
+        
+        this.generateStructure();
+      }
+
+      generateStructure() {
+        const { height, spread, branchiness, curvature } = this.dna;
+        
+        // Main stem
+        this.stem = {
+          segments: [],
+          length: height
+        };
+        
+        const segments = Math.floor(height / 10);
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          this.stem.segments.push({
+            x: curvature * Math.sin(t * Math.PI) * 20,
+            y: -t * height,
+            thickness: 3 * (1 - t * 0.7)
+          });
+        }
+        
+        // Branches
+        for (let i = 0; i < branchiness; i++) {
+          const t = 0.3 + (i / branchiness) * 0.5;
+          const side = i % 2 === 0 ? 1 : -1;
+          const length = height * spread * (0.3 + Math.random() * 0.3);
+          
+          this.branches.push({
+            startT: t,
+            angle: side * (30 + Math.random() * 30) * Math.PI / 180,
+            length: length,
+            thickness: 2
+          });
+        }
+        
+        // Blooms at branch tips and top
+        const { bloomCount, bloomSize } = this.dna;
+        for (let i = 0; i < bloomCount; i++) {
+          this.blooms.push({
+            branchIndex: i < this.branches.length ? i : -1,
+            size: bloomSize * (0.7 + Math.random() * 0.6),
+            petalCount: Math.floor(4 + Math.random() * 4),
+            rotation: Math.random() * Math.PI * 2,
+            openness: 0
+          });
+        }
+      }
+
+      update(wind, dt) {
+        // Grow
+        if (this.growth < this.maxGrowth) {
+          this.growth = Math.min(this.maxGrowth, this.growth + CONFIG.growthSpeed * dt);
+        }
+        
+        this.age += dt;
+        
+        // Update sway
+        this.swayOffset += dt * 0.002;
+        
+        // Open blooms as plant matures
+        this.blooms.forEach(bloom => {
+          if (this.growth > 0.7) {
+            bloom.openness = Math.min(1, bloom.openness + 0.01 * dt);
+          }
+        });
+        
+        // Shed pollen when mature and windy
+        if (this.growth > 0.9 && Math.random() < CONFIG.pollenChance * (Math.abs(wind.x) + Math.abs(wind.y))) {
+          this.shedPollen(wind);
+        }
+      }
+
+      shedPollen(wind) {
+        const topY = this.y - this.dna.height * this.growth;
+        state.pollen.push({
+          x: this.x + (Math.random() - 0.5) * 20,
+          y: topY,
+          vx: wind.x * 2 + (Math.random() - 0.5),
+          vy: -Math.random() * 0.5,
+          life: 200 + Math.random() * 100,
+          dna: { ...this.dna }
+        });
+      }
+
+      draw(ctx, wind) {
+        if (this.growth < 0.01) return;
+        
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        
+        const sway = Math.sin(this.swayOffset) * wind.x * 5 * this.growth;
+        
+        // Draw stem
+        ctx.strokeStyle = this.dna.stemColor;
+        ctx.lineCap = 'round';
+        
+        ctx.beginPath();
+        this.stem.segments.forEach((seg, i) => {
+          const progress = Math.min(1, this.growth * this.stem.segments.length / (i + 1));
+          if (progress <= 0) return;
+          
+          const x = seg.x + sway * (1 - seg.y / -this.dna.height);
+          const y = seg.y * this.growth;
+          
+          ctx.lineWidth = seg.thickness * progress;
+          
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+        
+        // Draw branches
+        this.branches.forEach((branch, bi) => {
+          if (this.growth < branch.startT) return;
+          
+          const branchGrowth = Math.min(1, (this.growth - branch.startT) / (1 - branch.startT));
+          const stemPoint = this.stem.segments[Math.floor(branch.startT * this.stem.segments.length)];
+          if (!stemPoint) return;
+          
+          const startX = stemPoint.x + sway * (1 - stemPoint.y / -this.dna.height);
+          const startY = stemPoint.y * this.growth;
+          
+          const endX = startX + Math.sin(branch.angle) * branch.length * branchGrowth;
+          const endY = startY - Math.cos(branch.angle) * branch.length * branchGrowth;
+          
+          ctx.lineWidth = branch.thickness * branchGrowth;
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(endX, endY);
+          ctx.stroke();
+          
+          // Small leaves on branches
+          if (branchGrowth > 0.5) {
+            ctx.fillStyle = this.dna.leafColor;
+            const leafSize = 4 * branchGrowth;
+            ctx.beginPath();
+            ctx.ellipse(
+              (startX + endX) / 2 + Math.sin(branch.angle + Math.PI/2) * 3,
+              (startY + endY) / 2 + Math.cos(branch.angle + Math.PI/2) * 3,
+              leafSize, leafSize * 0.5,
+              branch.angle, 0, Math.PI * 2
+            );
+            ctx.fill();
+          }
+        });
+        
+        // Draw blooms
+        this.blooms.forEach((bloom, bi) => {
+          if (bloom.openness < 0.1) return;
+          
+          let bx, by;
+          
+          if (bloom.branchIndex >= 0 && this.branches[bloom.branchIndex]) {
+            const branch = this.branches[bloom.branchIndex];
+            const branchGrowth = Math.min(1, (this.growth - branch.startT) / (1 - branch.startT));
+            if (branchGrowth < 0.8) return;
+            
+            const stemPoint = this.stem.segments[Math.floor(branch.startT * this.stem.segments.length)];
+            if (!stemPoint) return;
+            
+            const startX = stemPoint.x + sway * (1 - stemPoint.y / -this.dna.height);
+            const startY = stemPoint.y * this.growth;
+            
+            bx = startX + Math.sin(branch.angle) * branch.length * branchGrowth;
+            by = startY - Math.cos(branch.angle) * branch.length * branchGrowth;
+          } else {
+            // Top of stem
+            const topSeg = this.stem.segments[this.stem.segments.length - 1];
+            bx = topSeg.x + sway;
+            by = topSeg.y * this.growth;
+          }
+          
+          // Draw petals
+          ctx.fillStyle = this.dna.bloomColor;
+          const size = bloom.size * bloom.openness;
+          
+          for (let p = 0; p < bloom.petalCount; p++) {
+            const angle = bloom.rotation + (p / bloom.petalCount) * Math.PI * 2;
+            const px = bx + Math.cos(angle) * size * 0.5;
+            const py = by + Math.sin(angle) * size * 0.5;
+            
+            ctx.beginPath();
+            ctx.ellipse(px, py, size * 0.6, size * 0.3, angle, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          
+          // Center
+          ctx.fillStyle = state.season === 'winter' ? '#b0bec5' : '#ffeb3b';
+          ctx.beginPath();
+          ctx.arc(bx, by, size * 0.2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        
+        ctx.restore();
+      }
+    }
+
+    // ============ PERSISTENCE ============
+    function loadState() {
+      try {
+        const saved = localStorage.getItem('bloom_state');
+        if (saved) {
+          const data = JSON.parse(saved);
+          state.visits = (data.visits || 0) + 1;
+          state.totalPlants = data.totalPlants || 0;
+          state.lastVisit = data.lastVisit || Date.now();
+          state.gardenAge = data.gardenAge || 0;
+          
+          // Time passed since last visit affects garden
+          const hoursPassed = (Date.now() - state.lastVisit) / (1000 * 60 * 60);
+          
+          // Restore some plants (they've grown while you were away)
+          if (data.plantPositions && data.plantPositions.length > 0) {
+            const plantsToRestore = Math.min(data.plantPositions.length, CONFIG.maxPlants / 2);
+            
+            for (let i = 0; i < plantsToRestore; i++) {
+              const pos = data.plantPositions[i];
+              const plant = new Plant(pos.x * window.innerWidth, pos.y * window.innerHeight, pos.dna);
+              // Plants have grown while you were away
+              plant.growth = Math.min(1, 0.5 + hoursPassed * 0.1);
+              plant.blooms.forEach(b => b.openness = plant.growth > 0.7 ? 0.8 : 0);
+              state.plants.push(plant);
+            }
+          }
+          
+          // Update body class based on garden lushness
+          if (state.plants.length > 20) {
+            document.body.classList.add('lush');
+          }
+        }
+      } catch (e) {
+        console.log('Fresh garden');
+      }
+    }
+
+    function saveState() {
+      try {
+        // Save plant positions and DNA (normalized)
+        const plantPositions = state.plants.slice(-50).map(p => ({
+          x: p.x / window.innerWidth,
+          y: p.y / window.innerHeight,
+          dna: p.dna
+        }));
+        
+        localStorage.setItem('bloom_state', JSON.stringify({
+          visits: state.visits,
+          totalPlants: state.totalPlants,
+          lastVisit: Date.now(),
+          gardenAge: state.gardenAge,
+          plantPositions
+        }));
+      } catch (e) {
+        console.log('Could not save');
+      }
+    }
+
+    // ============ PLANTING ============
+    function plant(x, y, dna = null) {
+      if (state.plants.length >= CONFIG.maxPlants) {
+        // Remove oldest plant
+        state.plants.shift();
+      }
+      
+      const newPlant = new Plant(x, y, dna);
+      state.plants.push(newPlant);
+      state.totalPlants++;
+      
+      // Visual feedback
+      const ring = document.createElement('div');
+      ring.className = 'growth-ring';
+      ring.style.left = x + 'px';
+      ring.style.top = y + 'px';
+      ring.style.transform = 'translate(-50%, -50%)';
+      document.body.appendChild(ring);
+      setTimeout(() => ring.remove(), 1000);
+      
+      // Garden becomes lush
+      if (state.plants.length > 20) {
+        document.body.classList.add('lush');
+      }
+      
+      saveState();
+    }
+
+    // ============ POLLEN ============
+    function updatePollen(dt) {
+      state.pollen = state.pollen.filter(p => {
+        p.life -= dt;
+        if (p.life <= 0) return false;
+        
+        p.x += p.vx * dt * 0.1;
+        p.y += p.vy * dt * 0.1;
+        p.vy += 0.01 * dt; // gravity
+        
+        // Wind influence
+        p.vx += state.wind.x * 0.1;
+        
+        // Plant if lands on ground
+        if (p.y > window.innerHeight - 50 && Math.random() < 0.01) {
+          plant(p.x, window.innerHeight - 10 - Math.random() * 30, p.dna);
+          return false;
+        }
+        
+        return p.y < window.innerHeight + 50 && p.x > -50 && p.x < window.innerWidth + 50;
+      });
+    }
+
+    function drawPollen(ctx) {
+      ctx.fillStyle = 'rgba(255, 235, 150, 0.6)';
+      state.pollen.forEach(p => {
+        const alpha = p.life / 300;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    // ============ SEASONS ============
+    function updateSeason(dt) {
+      state.seasonTime += dt;
+      
+      if (state.seasonTime > CONFIG.seasonDuration) {
+        state.seasonTime = 0;
+        const seasons = ['spring', 'summer', 'autumn', 'winter'];
+        const currentIndex = seasons.indexOf(state.season);
+        state.season = seasons[(currentIndex + 1) % 4];
+        
+        seasonGlow.className = 'season-glow ' + state.season;
+      }
+    }
+
+    // ============ WIND ============
+    function updateWind(dt) {
+      // Wind based on mouse movement
+      const dx = state.mouseX - state.lastMouseX;
+      const dy = state.mouseY - state.lastMouseY;
+      state.mouseSpeed = Math.sqrt(dx * dx + dy * dy);
+      
+      state.targetWind.x = dx * CONFIG.windStrength;
+      state.targetWind.y = dy * CONFIG.windStrength * 0.3;
+      
+      // Smooth wind
+      state.wind.x += (state.targetWind.x - state.wind.x) * 0.05;
+      state.wind.y += (state.targetWind.y - state.wind.y) * 0.05;
+      
+      // Decay
+      state.targetWind.x *= 0.95;
+      state.targetWind.y *= 0.95;
+      
+      state.lastMouseX = state.mouseX;
+      state.lastMouseY = state.mouseY;
+    }
+
+    function drawWind(ctx) {
+      if (Math.abs(state.wind.x) < 0.1 && Math.abs(state.wind.y) < 0.1) return;
+      
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      
+      const strength = Math.sqrt(state.wind.x ** 2 + state.wind.y ** 2);
+      const lines = Math.floor(strength * 10);
+      
+      ctx.strokeStyle = `rgba(200, 200, 200, ${Math.min(0.3, strength * 0.1)})`;
+      ctx.lineWidth = 1;
+      
+      for (let i = 0; i < lines; i++) {
+        const x = Math.random() * ctx.canvas.width;
+        const y = Math.random() * ctx.canvas.height;
+        const length = 20 + strength * 10;
+        
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + state.wind.x * length, y + state.wind.y * length);
+        ctx.stroke();
+      }
+    }
+
+    // ============ INPUT ============
+    document.addEventListener('mousemove', (e) => {
+      state.mouseX = e.clientX;
+      state.mouseY = e.clientY;
+      cursor.style.left = e.clientX + 'px';
+      cursor.style.top = e.clientY + 'px';
+    });
+
+    document.addEventListener('mousedown', () => {
+      cursor.classList.add('planting');
+    });
+
+    document.addEventListener('mouseup', () => {
+      cursor.classList.remove('planting');
+    });
+
+    document.addEventListener('click', (e) => {
+      plant(e.clientX, e.clientY);
+    });
+
+    // Touch support
+    document.addEventListener('touchstart', (e) => {
+      const touch = e.touches[0];
+      state.mouseX = touch.clientX;
+      state.mouseY = touch.clientY;
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      state.mouseX = touch.clientX;
+      state.mouseY = touch.clientY;
+    });
+
+    document.addEventListener('touchend', (e) => {
+      if (e.changedTouches[0]) {
+        const touch = e.changedTouches[0];
+        plant(touch.clientX, touch.clientY);
+      }
+    });
+
+    // Double-click to scatter seeds
+    document.addEventListener('dblclick', (e) => {
+      for (let i = 0; i < 5; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 30 + Math.random() * 50;
+        setTimeout(() => {
+          plant(
+            e.clientX + Math.cos(angle) * dist,
+            e.clientY + Math.sin(angle) * dist
+          );
+        }, i * 100);
+      }
+    });
+
+    // Secret: shake device (mobile) to scatter pollen everywhere
+    if (window.DeviceMotionEvent) {
+      let lastShake = 0;
+      window.addEventListener('devicemotion', (e) => {
+        const acc = e.accelerationIncludingGravity;
+        if (acc) {
+          const shake = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
+          if (shake > 30 && Date.now() - lastShake > 1000) {
+            lastShake = Date.now();
+            state.plants.forEach(p => {
+              if (p.growth > 0.8) {
+                for (let i = 0; i < 3; i++) {
+                  p.shedPollen({ x: (Math.random() - 0.5) * 5, y: -2 });
+                }
+              }
+            });
+          }
+        }
+      });
+    }
+
+    // ============ MAIN LOOP ============
+    let lastTime = performance.now();
+
+    function loop() {
+      const now = performance.now();
+      const dt = Math.min(50, now - lastTime);
+      lastTime = now;
+      
+      state.gardenAge += dt;
+      
+      // Update
+      updateWind(dt);
+      updateSeason(dt);
+      updatePollen(dt);
+      
+      state.plants.forEach(plant => plant.update(state.wind, dt));
+      
+      // Draw garden
+      gardenCtx.clearRect(0, 0, gardenCanvas.width, gardenCanvas.height);
+      
+      // Sort by Y for depth
+      state.plants.sort((a, b) => a.y - b.y);
+      state.plants.forEach(plant => plant.draw(gardenCtx, state.wind));
+      
+      drawPollen(gardenCtx);
+      
+      // Draw wind
+      drawWind(windCtx);
+      
+      requestAnimationFrame(loop);
+    }
+
+    // ============ INIT ============
+    loadState();
+    loop();
+    
+    window.addEventListener('beforeunload', saveState);
+    
+    // Remove load overlay
+    setTimeout(() => {
+      document.querySelector('.load-overlay').remove();
+    }, 2500);
+  </script>
+</body>
+</html>
