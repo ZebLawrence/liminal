@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>liminal</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --visits: 1;
+      --veil-opacity: 1;
+      --depth-revealed: 0;
+      --cursor-x: 50%;
+      --cursor-y: 50%;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0a0a0c;
+      cursor: none;
+    }
+
+    /* The Abyss - deepest layer */
+    .abyss {
+      position: fixed;
+      inset: 0;
+      background: 
+        radial-gradient(ellipse at 30% 70%, #1a0a2e 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 30%, #0a1a2e 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, #0f0f1a 0%, #050508 100%);
+      animation: abyssShift 120s ease-in-out infinite;
+    }
+
+    @keyframes abyssShift {
+      0%, 100% { filter: hue-rotate(0deg); }
+      50% { filter: hue-rotate(30deg); }
+    }
+
+    /* Hidden geometry - only visible through tears */
+    .geometry {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: calc(0.1 + var(--depth-revealed) * 0.5);
+      transition: opacity 2s ease;
+    }
+
+    .shape {
+      position: absolute;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      animation: drift 60s linear infinite;
+      transform-style: preserve-3d;
+    }
+
+    .shape:nth-child(1) {
+      width: 300px;
+      height: 300px;
+      left: 10%;
+      top: 20%;
+      border-radius: 50%;
+      animation-duration: 80s;
+      animation-delay: -20s;
+    }
+
+    .shape:nth-child(2) {
+      width: 200px;
+      height: 200px;
+      right: 15%;
+      bottom: 30%;
+      transform: rotate(45deg);
+      animation-duration: 90s;
+      animation-delay: -40s;
+    }
+
+    .shape:nth-child(3) {
+      width: 150px;
+      height: 150px;
+      left: 50%;
+      top: 60%;
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+      animation-duration: 70s;
+      animation-delay: -10s;
+    }
+
+    .shape:nth-child(4) {
+      width: 400px;
+      height: 400px;
+      right: 30%;
+      top: 10%;
+      border-radius: 50%;
+      border-width: 2px;
+      opacity: 0.5;
+      animation-duration: 100s;
+    }
+
+    .shape:nth-child(5) {
+      width: 100px;
+      height: 100px;
+      left: 70%;
+      bottom: 20%;
+      animation-duration: 55s;
+      animation-delay: -30s;
+    }
+
+    @keyframes drift {
+      0% { 
+        transform: translate(0, 0) rotate(0deg) rotateX(0deg) rotateY(0deg); 
+      }
+      25% { 
+        transform: translate(30px, -50px) rotate(90deg) rotateX(15deg) rotateY(10deg); 
+      }
+      50% { 
+        transform: translate(-20px, 30px) rotate(180deg) rotateX(-10deg) rotateY(-15deg); 
+      }
+      75% { 
+        transform: translate(40px, 20px) rotate(270deg) rotateX(20deg) rotateY(-5deg); 
+      }
+      100% { 
+        transform: translate(0, 0) rotate(360deg) rotateX(0deg) rotateY(0deg); 
+      }
+    }
+
+    /* The membrane - living, breathing layer */
+    .membrane {
+      position: fixed;
+      inset: 0;
+      background: 
+        radial-gradient(circle at var(--cursor-x) var(--cursor-y), 
+          transparent 0%, 
+          transparent 80px,
+          rgba(10, 10, 20, 0.3) 150px,
+          rgba(10, 10, 20, 0.7) 300px
+        );
+      mix-blend-mode: multiply;
+      pointer-events: none;
+      transition: background 0.3s ease-out;
+    }
+
+    /* The veil - primary obscuring layer */
+    .veil {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(
+        135deg,
+        rgba(15, 15, 25, var(--veil-opacity)) 0%,
+        rgba(20, 15, 30, var(--veil-opacity)) 50%,
+        rgba(15, 20, 25, var(--veil-opacity)) 100%
+      );
+      backdrop-filter: blur(calc(20px * var(--veil-opacity)));
+      -webkit-backdrop-filter: blur(calc(20px * var(--veil-opacity)));
+      pointer-events: none;
+      animation: veilBreath 8s ease-in-out infinite;
+      transition: backdrop-filter 3s ease, -webkit-backdrop-filter 3s ease;
+    }
+
+    @keyframes veilBreath {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.95; }
+    }
+
+    /* Noise texture overlay */
+    .noise {
+      position: fixed;
+      inset: 0;
+      opacity: 0.03;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      animation: noiseShift 0.5s steps(5) infinite;
+    }
+
+    @keyframes noiseShift {
+      0% { transform: translate(0, 0); }
+      20% { transform: translate(-5%, 5%); }
+      40% { transform: translate(5%, -5%); }
+      60% { transform: translate(-3%, -3%); }
+      80% { transform: translate(3%, 3%); }
+      100% { transform: translate(0, 0); }
+    }
+
+    /* Tears in the veil - persistent marks */
+    .tear {
+      position: fixed;
+      pointer-events: none;
+      border-radius: 50%;
+      background: radial-gradient(
+        circle,
+        transparent 0%,
+        transparent 30%,
+        rgba(255, 255, 255, 0.02) 50%,
+        transparent 70%
+      );
+      animation: tearPulse 4s ease-in-out infinite;
+      mix-blend-mode: screen;
+    }
+
+    @keyframes tearPulse {
+      0%, 100% { 
+        transform: scale(1); 
+        opacity: 0.6;
+      }
+      50% { 
+        transform: scale(1.1); 
+        opacity: 0.8;
+      }
+    }
+
+    /* Click ripple effect */
+    .ripple {
+      position: fixed;
+      pointer-events: none;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      animation: rippleExpand 2s ease-out forwards;
+    }
+
+    @keyframes rippleExpand {
+      0% {
+        width: 0;
+        height: 0;
+        opacity: 1;
+      }
+      100% {
+        width: 400px;
+        height: 400px;
+        opacity: 0;
+      }
+    }
+
+    /* Custom cursor */
+    .cursor {
+      position: fixed;
+      width: 20px;
+      height: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      transition: transform 0.1s ease-out, width 0.3s, height 0.3s, border-color 0.3s;
+      mix-blend-mode: difference;
+      z-index: 9999;
+    }
+
+    .cursor.pressed {
+      width: 15px;
+      height: 15px;
+      border-color: rgba(255, 255, 255, 0.8);
+    }
+
+    .cursor-dot {
+      position: fixed;
+      width: 4px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      z-index: 9999;
+    }
+
+    /* Floating orbs that respond to stillness */
+    .orb {
+      position: fixed;
+      width: 8px;
+      height: 8px;
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 3s ease, transform 2s ease;
+    }
+
+    .orb.visible {
+      opacity: 1;
+    }
+
+    /* The watcher - appears after extended stillness */
+    .watcher {
+      position: fixed;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 5s ease, border-color 3s ease;
+      transform: translate(-50%, -50%);
+    }
+
+    .watcher.visible {
+      opacity: 1;
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .watcher::before {
+      content: '';
+      position: absolute;
+      inset: 15px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(100, 120, 180, 0.3) 0%, transparent 70%);
+      animation: watcherPulse 3s ease-in-out infinite;
+    }
+
+    @keyframes watcherPulse {
+      0%, 100% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(1.2); opacity: 0.8; }
+    }
+
+    /* Visit counter indicator - subtle corner glow */
+    .visit-indicator {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 8px;
+      height: 8px;
+      pointer-events: none;
+      opacity: 0.3;
+    }
+
+    .visit-indicator::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.5);
+      animation: indicatorPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes indicatorPulse {
+      0%, 100% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(1.5); opacity: 1; }
+    }
+
+    /* Hidden message - only visible after many visits and tears */
+    .depth-message {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 10s ease;
+    }
+
+    .depth-message svg {
+      width: 200px;
+      height: 200px;
+      stroke: rgba(255, 255, 255, 0.05);
+      stroke-width: 0.5;
+      fill: none;
+    }
+
+    /* Page load animation */
+    .load-overlay {
+      position: fixed;
+      inset: 0;
+      background: #050508;
+      z-index: 10000;
+      animation: fadeIn 3s ease-out forwards;
+      pointer-events: none;
+    }
+
+    @keyframes fadeIn {
+      0% { opacity: 1; }
+      70% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Mobile touch feedback */
+    @media (hover: none) {
+      .cursor, .cursor-dot {
+        display: none;
+      }
+      
+      html, body {
+        cursor: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="load-overlay"></div>
+  
+  <div class="abyss"></div>
+  
+  <div class="geometry">
+    <div class="shape"></div>
+    <div class="shape"></div>
+    <div class="shape"></div>
+    <div class="shape"></div>
+    <div class="shape"></div>
+  </div>
+  
+  <div class="depth-message">
+    <svg viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="40" />
+      <circle cx="50" cy="50" r="25" />
+      <circle cx="50" cy="50" r="10" />
+    </svg>
+  </div>
+  
+  <div class="membrane"></div>
+  <div class="veil"></div>
+  <div class="noise"></div>
+  
+  <div class="tears-container"></div>
+  
+  <div class="watcher"></div>
+  
+  <div class="visit-indicator"></div>
+  
+  <div class="cursor"></div>
+  <div class="cursor-dot"></div>
+  
+  <script>
+    // State
+    const state = {
+      visits: 1,
+      tears: [],
+      totalTears: 0,
+      lastMove: Date.now(),
+      stillnessRevealed: false,
+      mouseX: window.innerWidth / 2,
+      mouseY: window.innerHeight / 2,
+      targetX: window.innerWidth / 2,
+      targetY: window.innerHeight / 2
+    };
+
+    // Load persisted state
+    function loadState() {
+      try {
+        const saved = localStorage.getItem('liminal_state');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          state.visits = (parsed.visits || 0) + 1;
+          state.tears = parsed.tears || [];
+          state.totalTears = parsed.totalTears || 0;
+        }
+      } catch (e) {
+        console.log('Fresh start');
+      }
+      
+      // Apply visit-based modifications
+      const veilOpacity = Math.max(0.3, 1 - (state.visits * 0.08));
+      const depthRevealed = Math.min(1, state.totalTears * 0.02 + state.visits * 0.05);
+      
+      document.documentElement.style.setProperty('--veil-opacity', veilOpacity);
+      document.documentElement.style.setProperty('--depth-revealed', depthRevealed);
+      
+      // Restore tears
+      state.tears.forEach(tear => createTear(tear.x, tear.y, false));
+      
+      // Show depth message if enough exploration
+      if (depthRevealed > 0.7) {
+        document.querySelector('.depth-message').style.opacity = depthRevealed - 0.5;
+      }
+      
+      // Add visit indicators
+      const indicator = document.querySelector('.visit-indicator');
+      for (let i = 1; i < Math.min(state.visits, 10); i++) {
+        const dot = document.createElement('div');
+        dot.style.cssText = `
+          position: absolute;
+          width: 4px;
+          height: 4px;
+          background: rgba(255,255,255,0.3);
+          border-radius: 50%;
+          right: ${i * 12}px;
+          bottom: 0;
+        `;
+        indicator.appendChild(dot);
+      }
+    }
+
+    // Save state
+    function saveState() {
+      try {
+        localStorage.setItem('liminal_state', JSON.stringify({
+          visits: state.visits,
+          tears: state.tears.slice(-50), // Keep last 50 tears
+          totalTears: state.totalTears
+        }));
+      } catch (e) {
+        console.log('Could not save');
+      }
+    }
+
+    // Create a tear in the veil
+    function createTear(x, y, isNew = true) {
+      const tear = document.createElement('div');
+      tear.className = 'tear';
+      const size = 100 + Math.random() * 100;
+      tear.style.cssText = `
+        left: ${x}px;
+        top: ${y}px;
+        width: ${size}px;
+        height: ${size}px;
+        transform: translate(-50%, -50%);
+        animation-delay: ${Math.random() * 2}s;
+      `;
+      document.querySelector('.tears-container').appendChild(tear);
+      
+      if (isNew) {
+        state.tears.push({ x, y });
+        state.totalTears++;
+        
+        // Update depth revealed
+        const depthRevealed = Math.min(1, state.totalTears * 0.02 + state.visits * 0.05);
+        document.documentElement.style.setProperty('--depth-revealed', depthRevealed);
+        
+        if (depthRevealed > 0.7) {
+          document.querySelector('.depth-message').style.opacity = depthRevealed - 0.5;
+        }
+        
+        saveState();
+      }
+    }
+
+    // Create ripple effect
+    function createRipple(x, y) {
+      const ripple = document.createElement('div');
+      ripple.className = 'ripple';
+      ripple.style.cssText = `
+        left: ${x}px;
+        top: ${y}px;
+        transform: translate(-50%, -50%);
+      `;
+      document.body.appendChild(ripple);
+      
+      setTimeout(() => ripple.remove(), 2000);
+    }
+
+    // Cursor following
+    const cursor = document.querySelector('.cursor');
+    const cursorDot = document.querySelector('.cursor-dot');
+    const membrane = document.querySelector('.membrane');
+    const watcher = document.querySelector('.watcher');
+    
+    let cursorX = state.mouseX;
+    let cursorY = state.mouseY;
+
+    function updateCursor() {
+      // Smooth follow for outer cursor
+      cursorX += (state.targetX - cursorX) * 0.15;
+      cursorY += (state.targetY - cursorY) * 0.15;
+      
+      cursor.style.left = cursorX + 'px';
+      cursor.style.top = cursorY + 'px';
+      
+      // Instant follow for dot
+      cursorDot.style.left = state.targetX + 'px';
+      cursorDot.style.top = state.targetY + 'px';
+      
+      requestAnimationFrame(updateCursor);
+    }
+    
+    updateCursor();
+
+    // Mouse movement
+    document.addEventListener('mousemove', (e) => {
+      state.targetX = e.clientX;
+      state.targetY = e.clientY;
+      state.lastMove = Date.now();
+      state.stillnessRevealed = false;
+      
+      // Update membrane clearing effect
+      const xPercent = (e.clientX / window.innerWidth) * 100;
+      const yPercent = (e.clientY / window.innerHeight) * 100;
+      document.documentElement.style.setProperty('--cursor-x', xPercent + '%');
+      document.documentElement.style.setProperty('--cursor-y', yPercent + '%');
+      
+      // Hide watcher on movement
+      watcher.classList.remove('visible');
+    });
+
+    // Click to create tears
+    document.addEventListener('mousedown', (e) => {
+      cursor.classList.add('pressed');
+      createRipple(e.clientX, e.clientY);
+    });
+
+    document.addEventListener('mouseup', () => {
+      cursor.classList.remove('pressed');
+    });
+
+    document.addEventListener('click', (e) => {
+      createTear(e.clientX, e.clientY);
+    });
+
+    // Touch support
+    document.addEventListener('touchstart', (e) => {
+      const touch = e.touches[0];
+      state.targetX = touch.clientX;
+      state.targetY = touch.clientY;
+      createRipple(touch.clientX, touch.clientY);
+    });
+
+    document.addEventListener('touchend', (e) => {
+      if (e.changedTouches[0]) {
+        const touch = e.changedTouches[0];
+        createTear(touch.clientX, touch.clientY);
+      }
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      state.targetX = touch.clientX;
+      state.targetY = touch.clientY;
+      state.lastMove = Date.now();
+      
+      const xPercent = (touch.clientX / window.innerWidth) * 100;
+      const yPercent = (touch.clientY / window.innerHeight) * 100;
+      document.documentElement.style.setProperty('--cursor-x', xPercent + '%');
+      document.documentElement.style.setProperty('--cursor-y', yPercent + '%');
+    });
+
+    // Stillness detection - reveal the watcher
+    function checkStillness() {
+      const stillDuration = Date.now() - state.lastMove;
+      
+      if (stillDuration > 5000 && !state.stillnessRevealed) {
+        state.stillnessRevealed = true;
+        
+        // Position watcher near but not at cursor
+        const offsetX = (Math.random() - 0.5) * 200;
+        const offsetY = (Math.random() - 0.5) * 200;
+        watcher.style.left = (state.targetX + offsetX) + 'px';
+        watcher.style.top = (state.targetY + offsetY) + 'px';
+        watcher.classList.add('visible');
+        
+        // Create ambient orbs
+        for (let i = 0; i < 3; i++) {
+          setTimeout(() => {
+            if (state.stillnessRevealed) {
+              createOrb();
+            }
+          }, i * 1000);
+        }
+      }
+      
+      requestAnimationFrame(checkStillness);
+    }
+    
+    checkStillness();
+
+    // Create floating orbs
+    function createOrb() {
+      const orb = document.createElement('div');
+      orb.className = 'orb';
+      orb.style.left = (Math.random() * window.innerWidth) + 'px';
+      orb.style.top = (Math.random() * window.innerHeight) + 'px';
+      document.body.appendChild(orb);
+      
+      setTimeout(() => orb.classList.add('visible'), 100);
+      
+      // Drift animation
+      const drift = () => {
+        if (!state.stillnessRevealed) {
+          orb.classList.remove('visible');
+          setTimeout(() => orb.remove(), 3000);
+          return;
+        }
+        
+        const currentLeft = parseFloat(orb.style.left);
+        const currentTop = parseFloat(orb.style.top);
+        orb.style.left = (currentLeft + (Math.random() - 0.5) * 2) + 'px';
+        orb.style.top = (currentTop + (Math.random() - 0.5) * 2) + 'px';
+        
+        requestAnimationFrame(drift);
+      };
+      
+      drift();
+    }
+
+    // Keyboard interaction - secret
+    const keys = [];
+    document.addEventListener('keydown', (e) => {
+      keys.push(e.key);
+      if (keys.length > 10) keys.shift();
+      
+      // Secret: typing "deeper" intensifies the reveal
+      if (keys.join('').includes('deeper')) {
+        state.totalTears += 10;
+        const depthRevealed = Math.min(1, state.totalTears * 0.02 + state.visits * 0.05);
+        document.documentElement.style.setProperty('--depth-revealed', depthRevealed);
+        document.documentElement.style.setProperty('--veil-opacity', Math.max(0.1, 0.5 - depthRevealed * 0.4));
+        
+        // Flash effect
+        document.body.style.transition = 'background 0.5s';
+        document.body.style.background = '#1a1a2e';
+        setTimeout(() => {
+          document.body.style.background = '#0a0a0c';
+        }, 500);
+        
+        saveState();
+        keys.length = 0;
+      }
+    });
+
+    // Window resize handling
+    window.addEventListener('resize', () => {
+      state.targetX = window.innerWidth / 2;
+      state.targetY = window.innerHeight / 2;
+    });
+
+    // Initialize
+    loadState();
+    
+    // Save on page leave
+    window.addEventListener('beforeunload', saveState);
+    
+    // Remove load overlay after animation
+    setTimeout(() => {
+      document.querySelector('.load-overlay').remove();
+    }, 3500);
+  </script>
+</body>
+</html>
