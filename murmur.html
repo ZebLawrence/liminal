@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>murmur</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #040608;
+      cursor: none;
+    }
+
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+    }
+
+    #deep { z-index: 1; }
+    #main { z-index: 2; }
+    #glow { z-index: 3; pointer-events: none; }
+
+    .cursor {
+      position: fixed;
+      width: 18px;
+      height: 18px;
+      border: 1px solid rgba(120, 200, 255, 0.3);
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      mix-blend-mode: screen;
+      z-index: 100;
+      transition: width 0.6s ease, height 0.6s ease, border-color 0.8s ease, box-shadow 0.8s ease;
+    }
+
+    .cursor.listening {
+      width: 44px;
+      height: 44px;
+      border-color: rgba(120, 200, 255, 0.08);
+      box-shadow: 0 0 30px rgba(80, 180, 255, 0.05);
+    }
+
+    .cursor-dot {
+      position: fixed;
+      width: 3px;
+      height: 3px;
+      background: rgba(150, 220, 255, 0.6);
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      z-index: 100;
+    }
+
+    .load-overlay {
+      position: fixed;
+      inset: 0;
+      background: #040608;
+      z-index: 10000;
+      animation: emerge 3.5s ease-out forwards;
+      pointer-events: none;
+    }
+
+    @keyframes emerge {
+      0% { opacity: 1; }
+      60% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    .visit-mark {
+      position: fixed;
+      bottom: 14px;
+      right: 14px;
+      pointer-events: none;
+      z-index: 50;
+      display: flex;
+      gap: 5px;
+    }
+
+    .visit-mark .dot {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: rgba(100, 180, 255, 0.15);
+    }
+
+    @media (hover: none) {
+      .cursor, .cursor-dot { display: none; }
+      html, body { cursor: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="load-overlay"></div>
+
+  <canvas id="deep"></canvas>
+  <canvas id="main"></canvas>
+  <canvas id="glow"></canvas>
+
+  <div class="cursor"></div>
+  <div class="cursor-dot"></div>
+  <div class="visit-mark"></div>
+
+  <script>
+    // ============ CANVAS SETUP ============
+    const deepCanvas = document.getElementById('deep');
+    const mainCanvas = document.getElementById('main');
+    const glowCanvas = document.getElementById('glow');
+    const deepCtx = deepCanvas.getContext('2d');
+    const mainCtx = mainCanvas.getContext('2d');
+    const glowCtx = glowCanvas.getContext('2d');
+    const cursorEl = document.querySelector('.cursor');
+    const cursorDot = document.querySelector('.cursor-dot');
+
+    let W, H;
+    function resize() {
+      W = window.innerWidth;
+      H = window.innerHeight;
+      [deepCanvas, mainCanvas, glowCanvas].forEach(c => {
+        c.width = W;
+        c.height = H;
+      });
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ============ TIME-OF-DAY PALETTE ============
+    function getTimeColors() {
+      const h = new Date().getHours() + new Date().getMinutes() / 60;
+
+      if (h >= 5 && h < 9) {
+        const t = (h - 5) / 4;
+        return {
+          trail: lerpC([60, 180, 220], [180, 140, 100], t),
+          glow: lerpC([40, 120, 180], [160, 100, 60], t),
+          organism: lerpC([80, 200, 240], [200, 160, 100], t),
+          echo: lerpC([40, 100, 160], [140, 100, 60], t),
+          pulse: lerpC([100, 220, 255], [255, 180, 100], t),
+          deep: lerpC([4, 8, 16], [8, 6, 10], t),
+        };
+      } else if (h >= 9 && h < 17) {
+        return {
+          trail: [70, 190, 230],
+          glow: [50, 140, 200],
+          organism: [90, 210, 245],
+          echo: [50, 120, 180],
+          pulse: [120, 230, 255],
+          deep: [5, 8, 14],
+        };
+      } else if (h >= 17 && h < 21) {
+        const t = (h - 17) / 4;
+        return {
+          trail: lerpC([70, 190, 230], [140, 80, 200], t),
+          glow: lerpC([50, 140, 200], [100, 50, 160], t),
+          organism: lerpC([90, 210, 245], [160, 100, 220], t),
+          echo: lerpC([50, 120, 180], [80, 50, 140], t),
+          pulse: lerpC([120, 230, 255], [180, 120, 255], t),
+          deep: lerpC([5, 8, 14], [6, 4, 12], t),
+        };
+      } else {
+        return {
+          trail: [50, 160, 200],
+          glow: [30, 100, 160],
+          organism: [60, 180, 220],
+          echo: [30, 80, 140],
+          pulse: [80, 200, 240],
+          deep: [4, 6, 12],
+        };
+      }
+    }
+
+    function lerpC(a, b, t) {
+      return [
+        Math.round(a[0] + (b[0] - a[0]) * t),
+        Math.round(a[1] + (b[1] - a[1]) * t),
+        Math.round(a[2] + (b[2] - a[2]) * t)
+      ];
+    }
+
+    function rgba(c, a) {
+      return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+    }
+
+    // ============ STATE ============
+    const state = {
+      mx: 0, my: 0,
+      tx: 0, ty: 0,
+      cx: 0, cy: 0,
+      speed: 0,
+      lastMove: Date.now(),
+      isStill: false,
+      stillDuration: 0,
+
+      trail: [],           // current trail: [{x, y, t, vx, vy}]
+      marks: [],            // persistent click marks
+      organisms: [],        // ambient drifting lights
+      pulses: [],           // click pulse waves
+      resonances: [],       // where current path crosses echo paths
+      mandalaParts: [],     // stillness mandala particles
+
+      echoes: [],           // past visit trails from localStorage
+      echoHeads: [],        // current playback position per echo
+
+      visits: 1,
+      totalMarks: 0,
+    };
+
+    // ============ ORGANISMS ============
+    class Organism {
+      constructor(x, y) {
+        this.x = x || Math.random() * W;
+        this.y = y || Math.random() * H;
+        this.vx = (Math.random() - 0.5) * 0.2;
+        this.vy = (Math.random() - 0.5) * 0.2;
+        this.size = 1 + Math.random() * 2;
+        this.brightness = 0.2 + Math.random() * 0.5;
+        this.phase = Math.random() * Math.PI * 2;
+        this.driftPhase = Math.random() * Math.PI * 2;
+        this.attracted = false;
+      }
+
+      update(dt) {
+        this.phase += dt * 0.002;
+        this.driftPhase += dt * 0.0005;
+
+        // Ambient current
+        this.vx += Math.sin(this.driftPhase + this.y * 0.003) * 0.002 * dt;
+        this.vy += Math.cos(this.driftPhase + this.x * 0.002) * 0.001 * dt;
+
+        // Cursor attraction when still
+        if (state.isStill) {
+          const dx = state.mx - this.x;
+          const dy = state.my - this.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          if (dist < 300) {
+            const force = (300 - dist) / 300;
+            const angle = Math.atan2(dy, dx);
+            // Spiral inward
+            const spiralSpeed = 0.3 + force * 0.5;
+            this.vx += Math.cos(angle + Math.PI * 0.4) * spiralSpeed * 0.008 * dt;
+            this.vy += Math.sin(angle + Math.PI * 0.4) * spiralSpeed * 0.008 * dt;
+            // Gentle pull
+            this.vx += (dx / dist) * force * 0.003 * dt;
+            this.vy += (dy / dist) * force * 0.003 * dt;
+            this.attracted = true;
+          } else {
+            this.attracted = false;
+          }
+        } else if (state.speed > 4) {
+          // Scatter when cursor moves fast nearby
+          const dx = this.x - state.mx;
+          const dy = this.y - state.my;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          if (dist < 120) {
+            const force = (120 - dist) / 120;
+            this.vx += (dx / dist) * force * 0.1 * dt;
+            this.vy += (dy / dist) * force * 0.1 * dt;
+          }
+          this.attracted = false;
+        } else {
+          this.attracted = false;
+        }
+
+        // Damping
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // Wrap
+        if (this.x < -30) this.x += W + 60;
+        if (this.x > W + 30) this.x -= W + 60;
+        if (this.y < -30) this.y += H + 60;
+        if (this.y > H + 30) this.y -= H + 60;
+      }
+
+      draw(ctx, colors) {
+        const pulse = 0.6 + Math.sin(this.phase) * 0.4;
+        const alpha = this.brightness * pulse * (this.attracted ? 1.5 : 0.6);
+        const c = this.attracted ? colors.pulse : colors.organism;
+        const s = this.size * (this.attracted ? 1.3 : 1);
+
+        // Outer glow
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, s * 6, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(c, alpha * 0.04);
+        ctx.fill();
+
+        // Inner glow
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, s * 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(c, alpha * 0.15);
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, s, 0, Math.PI * 2);
+        ctx.fillStyle = rgba([255, 255, 255], alpha * 0.7);
+        ctx.fill();
+      }
+    }
+
+    // ============ PULSE (click waves) ============
+    class Pulse {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 0;
+        this.maxRadius = 250 + Math.random() * 100;
+        this.life = 1;
+        this.speed = 1.5 + Math.random() * 0.5;
+      }
+
+      update(dt) {
+        this.radius += this.speed * dt;
+        this.life = Math.max(0, 1 - this.radius / this.maxRadius);
+      }
+
+      draw(ctx, colors) {
+        if (this.life <= 0) return;
+        const alpha = this.life * 0.4;
+
+        // Outer ring
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(colors.pulse, alpha * 0.3);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Inner ring
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 0.7, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(colors.pulse, alpha * 0.15);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Glow band
+        const grad = ctx.createRadialGradient(
+          this.x, this.y, this.radius * 0.9,
+          this.x, this.y, this.radius * 1.1
+        );
+        grad.addColorStop(0, rgba(colors.glow, 0));
+        grad.addColorStop(0.5, rgba(colors.glow, alpha * 0.08));
+        grad.addColorStop(1, rgba(colors.glow, 0));
+        ctx.fillStyle = grad;
+        ctx.fillRect(
+          this.x - this.radius * 1.2, this.y - this.radius * 1.2,
+          this.radius * 2.4, this.radius * 2.4
+        );
+      }
+    }
+
+    // ============ PERSISTENCE ============
+    function loadState() {
+      try {
+        const saved = localStorage.getItem('murmur_state');
+        if (saved) {
+          const data = JSON.parse(saved);
+          state.visits = (data.visits || 0) + 1;
+          state.totalMarks = data.totalMarks || 0;
+
+          // Restore marks (denormalize)
+          if (data.marks) {
+            state.marks = data.marks.map(m => ({
+              x: m.x * W,
+              y: m.y * H,
+              created: m.created,
+              color: m.color
+            }));
+          }
+
+          // Restore echo trails
+          if (data.echoes) {
+            state.echoes = data.echoes;
+          }
+
+          // Add current trail from last visit as a new echo
+          if (data.currentTrail && data.currentTrail.length > 10) {
+            state.echoes.push({
+              trail: data.currentTrail,
+              visit: data.visits,
+              timestamp: data.lastSave || Date.now()
+            });
+            // Keep only last N echoes
+            if (state.echoes.length > 8) {
+              state.echoes = state.echoes.slice(-8);
+            }
+          }
+        }
+      } catch (e) {
+        // Fresh start
+      }
+
+      // Initialize organisms — more per visit
+      const count = Math.min(200, 40 + state.visits * 8);
+      for (let i = 0; i < count; i++) {
+        state.organisms.push(new Organism());
+      }
+
+      // Initialize echo playback heads
+      state.echoHeads = state.echoes.map(() => ({
+        index: 0,
+        timer: 0,
+        active: true,
+        delay: Math.random() * 3000 // stagger start
+      }));
+
+      // Visit marks
+      const markContainer = document.querySelector('.visit-mark');
+      for (let i = 0; i < Math.min(state.visits, 20); i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        dot.style.opacity = 0.1 + (i / Math.min(state.visits, 20)) * 0.3;
+        markContainer.appendChild(dot);
+      }
+    }
+
+    function saveState() {
+      try {
+        // Normalize trail positions
+        const currentTrail = state.trail
+          .filter((_, i) => i % 3 === 0) // downsample
+          .slice(-300)
+          .map(p => ({ x: p.x / W, y: p.y / H }));
+
+        // Normalize marks
+        const marks = state.marks.slice(-50).map(m => ({
+          x: m.x / W,
+          y: m.y / H,
+          created: m.created,
+          color: m.color
+        }));
+
+        localStorage.setItem('murmur_state', JSON.stringify({
+          visits: state.visits,
+          totalMarks: state.totalMarks,
+          marks,
+          echoes: state.echoes,
+          currentTrail,
+          lastSave: Date.now()
+        }));
+      } catch (e) {}
+    }
+
+    // ============ TRAIL ============
+    function addTrailPoint(x, y) {
+      const now = performance.now();
+      const last = state.trail[state.trail.length - 1];
+      if (last) {
+        const dx = x - last.x;
+        const dy = y - last.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 2) return; // skip tiny movements
+      }
+      state.trail.push({ x, y, t: now });
+      if (state.trail.length > 600) state.trail.shift();
+    }
+
+    function drawTrail(ctx, colors) {
+      const trail = state.trail;
+      if (trail.length < 2) return;
+      const now = performance.now();
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Glow pass
+      for (let i = 1; i < trail.length; i++) {
+        const p0 = trail[i - 1];
+        const p1 = trail[i];
+        const age = (now - p1.t) / 1000;
+        const fade = Math.max(0, 1 - age / 4);
+        if (fade <= 0) continue;
+
+        const alpha = fade * 0.06;
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = rgba(colors.glow, alpha);
+        ctx.lineWidth = 20;
+        ctx.stroke();
+      }
+
+      // Core pass
+      for (let i = 1; i < trail.length; i++) {
+        const p0 = trail[i - 1];
+        const p1 = trail[i];
+        const age = (now - p1.t) / 1000;
+        const fade = Math.max(0, 1 - age / 3);
+        if (fade <= 0) continue;
+
+        const alpha = fade * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = rgba(colors.trail, alpha);
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+
+      // Bright tip
+      if (trail.length > 0 && state.speed > 0.5) {
+        const tip = trail[trail.length - 1];
+        const intensity = Math.min(1, state.speed / 8);
+
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(colors.pulse, intensity * 0.1);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = rgba([255, 255, 255], intensity * 0.4);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // ============ ECHO TRAILS ============
+    function updateEchoes(dt) {
+      state.echoes.forEach((echo, ei) => {
+        const head = state.echoHeads[ei];
+        if (!head || !head.active) return;
+
+        if (head.delay > 0) {
+          head.delay -= dt;
+          return;
+        }
+
+        head.timer += dt;
+        // Advance through the trail
+        if (head.timer > 40) { // ~25fps playback
+          head.timer = 0;
+          head.index++;
+          if (head.index >= echo.trail.length) {
+            head.index = 0; // loop
+            head.delay = 2000 + Math.random() * 4000; // pause before replay
+          }
+
+          // Check resonance with current cursor
+          if (echo.trail[head.index]) {
+            const ep = echo.trail[head.index];
+            const ex = ep.x * W;
+            const ey = ep.y * H;
+            const dx = state.mx - ex;
+            const dy = state.my - ey;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 40 && state.speed > 0.5) {
+              createResonance(ex, ey);
+            }
+          }
+        }
+      });
+    }
+
+    function drawEchoes(ctx, colors) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+
+      state.echoes.forEach((echo, ei) => {
+        const head = state.echoHeads[ei];
+        if (!head || !head.active) return;
+
+        const trail = echo.trail;
+        const age = (Date.now() - (echo.timestamp || Date.now())) / (1000 * 60 * 60 * 24);
+        const ageFade = Math.max(0.15, 1 - age / 30); // fade over 30 days
+        const visitFade = 0.3 + (ei / state.echoes.length) * 0.7; // older echoes dimmer
+
+        // Draw the visible portion of the echo trail
+        const windowSize = 80;
+        const start = Math.max(0, head.index - windowSize);
+        const end = head.index;
+
+        if (end - start < 2) { ctx.restore(); return; }
+
+        for (let i = start + 1; i < end && i < trail.length; i++) {
+          const p0 = trail[i - 1];
+          const p1 = trail[i];
+          if (!p0 || !p1) continue;
+
+          const localFade = (i - start) / windowSize;
+          const alpha = localFade * ageFade * visitFade * 0.08;
+
+          ctx.beginPath();
+          ctx.moveTo(p0.x * W, p0.y * H);
+          ctx.lineTo(p1.x * W, p1.y * H);
+          ctx.strokeStyle = rgba(colors.echo, alpha);
+          ctx.lineWidth = 8;
+          ctx.stroke();
+        }
+
+        // Core line
+        for (let i = start + 1; i < end && i < trail.length; i++) {
+          const p0 = trail[i - 1];
+          const p1 = trail[i];
+          if (!p0 || !p1) continue;
+
+          const localFade = (i - start) / windowSize;
+          const alpha = localFade * ageFade * visitFade * 0.25;
+
+          ctx.beginPath();
+          ctx.moveTo(p0.x * W, p0.y * H);
+          ctx.lineTo(p1.x * W, p1.y * H);
+          ctx.strokeStyle = rgba(colors.echo, alpha);
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+
+        // Echo head glow
+        if (trail[head.index]) {
+          const hp = trail[head.index];
+          const hx = hp.x * W;
+          const hy = hp.y * H;
+          const alpha = ageFade * visitFade * 0.15;
+
+          ctx.beginPath();
+          ctx.arc(hx, hy, 10, 0, Math.PI * 2);
+          ctx.fillStyle = rgba(colors.echo, alpha);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(hx, hy, 3, 0, Math.PI * 2);
+          ctx.fillStyle = rgba([255, 255, 255], alpha * 0.5);
+          ctx.fill();
+        }
+      });
+
+      ctx.restore();
+    }
+
+    // ============ RESONANCE ============
+    function createResonance(x, y) {
+      // Don't spam resonances
+      const now = performance.now();
+      const recent = state.resonances.filter(r => now - r.born < 500);
+      if (recent.length > 3) return;
+
+      state.resonances.push({
+        x, y,
+        born: now,
+        life: 1,
+        size: 0
+      });
+
+      // Spawn organism at resonance point occasionally
+      if (Math.random() < 0.3 && state.organisms.length < 200) {
+        state.organisms.push(new Organism(x, y));
+      }
+    }
+
+    function updateResonances(dt) {
+      state.resonances = state.resonances.filter(r => {
+        r.life -= dt * 0.0008;
+        r.size += dt * 0.15;
+        return r.life > 0;
+      });
+    }
+
+    function drawResonances(ctx, colors) {
+      if (state.resonances.length === 0) return;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      state.resonances.forEach(r => {
+        // Bloom of light
+        const alpha = r.life;
+
+        // Outer bloom
+        const grad = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, 40 + r.size);
+        grad.addColorStop(0, rgba(colors.pulse, alpha * 0.3));
+        grad.addColorStop(0.3, rgba(colors.trail, alpha * 0.1));
+        grad.addColorStop(1, rgba(colors.glow, 0));
+        ctx.fillStyle = grad;
+        ctx.fillRect(r.x - 60 - r.size, r.y - 60 - r.size, 120 + r.size * 2, 120 + r.size * 2);
+
+        // Core flash
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, 3 * alpha, 0, Math.PI * 2);
+        ctx.fillStyle = rgba([255, 255, 255], alpha * 0.8);
+        ctx.fill();
+      });
+
+      ctx.restore();
+    }
+
+    // ============ MARKS ============
+    function createMark(x, y, colors) {
+      state.marks.push({
+        x, y,
+        created: Date.now(),
+        color: [...colors.trail]
+      });
+      state.totalMarks++;
+
+      // Create pulse
+      state.pulses.push(new Pulse(x, y));
+
+      // Activate nearby organisms
+      state.organisms.forEach(o => {
+        const dx = o.x - x;
+        const dy = o.y - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 200) {
+          const force = (200 - dist) / 200;
+          o.vx += (dx / (dist || 1)) * force * 3;
+          o.vy += (dy / (dist || 1)) * force * 3;
+          o.brightness = Math.min(1, o.brightness + force * 0.5);
+        }
+      });
+
+      saveState();
+    }
+
+    function drawMarks(ctx, colors) {
+      if (state.marks.length === 0) return;
+      const now = Date.now();
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      state.marks.forEach(m => {
+        const ageHours = (now - m.created) / (1000 * 60 * 60);
+        const fade = Math.max(0.05, 1 - ageHours / (24 * 14)); // 2 weeks
+        const pulse = 0.7 + Math.sin(now * 0.001 + m.x * 0.01) * 0.3;
+        const alpha = fade * pulse;
+        const c = m.color || colors.trail;
+
+        // Deep glow
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 25, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(c, alpha * 0.03);
+        ctx.fill();
+
+        // Mid glow
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(c, alpha * 0.1);
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = rgba([255, 255, 255], alpha * 0.4);
+        ctx.fill();
+      });
+
+      ctx.restore();
+    }
+
+    // ============ DEEP LAYER (background) ============
+    let deepTime = Math.random() * 1000;
+
+    function drawDeep(ctx, colors) {
+      deepTime += 0.003;
+
+      // Dark gradient base
+      const bg = colors.deep;
+      ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+      ctx.fillRect(0, 0, W, H);
+
+      // Subtle moving caustic-like patterns
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      const cellSize = 120;
+      const cols = Math.ceil(W / cellSize) + 1;
+      const rows = Math.ceil(H / cellSize) + 1;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const bx = c * cellSize;
+          const by = r * cellSize;
+
+          // Organic noise-like pattern using overlapping sines
+          const v1 = Math.sin(bx * 0.005 + deepTime) * Math.cos(by * 0.007 + deepTime * 0.7);
+          const v2 = Math.sin((bx + by) * 0.003 + deepTime * 1.3);
+          const v3 = Math.cos(bx * 0.008 - by * 0.004 + deepTime * 0.5);
+          const val = (v1 + v2 + v3) / 3;
+
+          const alpha = (val * 0.5 + 0.5) * 0.015;
+          if (alpha > 0.003) {
+            ctx.fillStyle = rgba(colors.glow, alpha);
+            ctx.fillRect(bx - cellSize * 0.3, by - cellSize * 0.3, cellSize * 1.6, cellSize * 1.6);
+          }
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // ============ STILLNESS MANDALA ============
+    function updateMandala(dt) {
+      if (state.isStill && state.stillDuration > 3000) {
+        // Add particles to mandala
+        const count = state.mandalaParts.length;
+        if (count < 60) {
+          const angle = count * 2.399; // golden angle
+          const r = 20 + count * 1.5;
+          state.mandalaParts.push({
+            angle,
+            targetR: r,
+            currentR: 0,
+            size: 1 + Math.random(),
+            phase: Math.random() * Math.PI * 2,
+            born: performance.now()
+          });
+        }
+      } else {
+        // Dissolve mandala
+        if (state.mandalaParts.length > 0) {
+          state.mandalaParts = state.mandalaParts.filter(p => {
+            p.currentR += 3;
+            p.size *= 0.95;
+            return p.size > 0.2;
+          });
+        }
+      }
+
+      // Update existing mandala particles
+      state.mandalaParts.forEach(p => {
+        if (state.isStill) {
+          p.currentR += (p.targetR - p.currentR) * 0.03;
+          p.angle += 0.002;
+        }
+        p.phase += 0.02;
+      });
+    }
+
+    function drawMandala(ctx, colors) {
+      if (state.mandalaParts.length === 0) return;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      state.mandalaParts.forEach(p => {
+        const x = state.mx + Math.cos(p.angle) * p.currentR;
+        const y = state.my + Math.sin(p.angle) * p.currentR;
+        const pulse = 0.6 + Math.sin(p.phase) * 0.4;
+        const alpha = pulse * Math.min(1, p.size) * 0.4;
+
+        // Glow
+        ctx.beginPath();
+        ctx.arc(x, y, p.size * 4, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(colors.pulse, alpha * 0.1);
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = rgba([255, 255, 255], alpha * 0.6);
+        ctx.fill();
+
+        // Connecting line to center (very faint)
+        ctx.beginPath();
+        ctx.moveTo(state.mx, state.my);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = rgba(colors.glow, alpha * 0.03);
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      });
+
+      ctx.restore();
+    }
+
+    // ============ SECRET: RETRACE ECHO ============
+    // If you move slowly along an echo's path, it awakens
+    let awakenedEchoes = new Set();
+
+    function checkEchoAwaken() {
+      if (state.speed < 0.5 || state.speed > 5) return;
+
+      state.echoes.forEach((echo, ei) => {
+        if (awakenedEchoes.has(ei)) return;
+        const head = state.echoHeads[ei];
+        if (!head) return;
+
+        // Check a window of points near the playback head
+        const checkRange = 30;
+        let closePoints = 0;
+        for (let i = Math.max(0, head.index - checkRange); i < Math.min(echo.trail.length, head.index + checkRange); i++) {
+          const p = echo.trail[i];
+          if (!p) continue;
+          const dx = state.mx - p.x * W;
+          const dy = state.my - p.y * H;
+          if (Math.sqrt(dx * dx + dy * dy) < 25) {
+            closePoints++;
+          }
+        }
+
+        if (closePoints > 8) {
+          // Awaken this echo
+          awakenedEchoes.add(ei);
+          // Create burst of resonances along the echo
+          for (let i = 0; i < echo.trail.length; i += 15) {
+            const p = echo.trail[i];
+            if (p) {
+              setTimeout(() => {
+                createResonance(p.x * W, p.y * H);
+              }, i * 5);
+            }
+          }
+          // Reset after some time
+          setTimeout(() => awakenedEchoes.delete(ei), 10000);
+        }
+      });
+    }
+
+    // ============ INPUT ============
+    document.addEventListener('mousemove', (e) => {
+      state.tx = e.clientX;
+      state.ty = e.clientY;
+      state.lastMove = Date.now();
+      addTrailPoint(e.clientX, e.clientY);
+    });
+
+    document.addEventListener('click', (e) => {
+      createMark(e.clientX, e.clientY, colorsCache);
+    });
+
+    document.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      state.tx = t.clientX;
+      state.ty = t.clientY;
+      state.lastMove = Date.now();
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      state.tx = t.clientX;
+      state.ty = t.clientY;
+      state.lastMove = Date.now();
+      addTrailPoint(t.clientX, t.clientY);
+    }, { passive: false });
+
+    document.addEventListener('touchend', (e) => {
+      if (e.changedTouches[0]) {
+        const t = e.changedTouches[0];
+        createMark(t.clientX, t.clientY, colorsCache);
+      }
+    });
+
+    // ============ MAIN LOOP ============
+    let lastTime = performance.now();
+    let colorsCache = getTimeColors();
+    let colorTimer = 0;
+    let saveTimer = 0;
+
+    function loop() {
+      const now = performance.now();
+      const dt = Math.min(50, now - lastTime);
+      lastTime = now;
+
+      // Update colors periodically
+      colorTimer += dt;
+      if (colorTimer > 30000) {
+        colorsCache = getTimeColors();
+        colorTimer = 0;
+      }
+      const colors = colorsCache;
+
+      // Smooth cursor
+      state.cx += (state.tx - state.cx) * 0.12;
+      state.cy += (state.ty - state.cy) * 0.12;
+
+      const dx = state.tx - state.mx;
+      const dy = state.ty - state.my;
+      state.speed = Math.sqrt(dx * dx + dy * dy);
+      state.mx = state.tx;
+      state.my = state.ty;
+
+      // Stillness
+      const stillMs = Date.now() - state.lastMove;
+      const wasStill = state.isStill;
+      state.isStill = stillMs > 2000;
+      state.stillDuration = state.isStill ? stillMs : 0;
+
+      // Cursor visual
+      cursorEl.style.left = state.cx + 'px';
+      cursorEl.style.top = state.cy + 'px';
+      cursorDot.style.left = state.tx + 'px';
+      cursorDot.style.top = state.ty + 'px';
+
+      if (state.isStill) {
+        cursorEl.classList.add('listening');
+      } else {
+        cursorEl.classList.remove('listening');
+      }
+
+      // ---- UPDATE ----
+      state.organisms.forEach(o => o.update(dt));
+      state.pulses = state.pulses.filter(p => { p.update(dt); return p.life > 0; });
+      updateEchoes(dt);
+      updateResonances(dt);
+      updateMandala(dt);
+
+      // Check for echo awakening periodically
+      if (Math.random() < 0.05) checkEchoAwaken();
+
+      // Cull old trail points
+      const trailCutoff = now - 5000;
+      while (state.trail.length > 0 && state.trail[0].t < trailCutoff) {
+        state.trail.shift();
+      }
+
+      // ---- DRAW ----
+
+      // Deep layer (background)
+      drawDeep(deepCtx, colors);
+
+      // Main layer
+      mainCtx.clearRect(0, 0, W, H);
+      mainCtx.save();
+      mainCtx.globalCompositeOperation = 'lighter';
+
+      // Echo trails
+      drawEchoes(mainCtx, colors);
+
+      // Marks
+      drawMarks(mainCtx, colors);
+
+      // Organisms
+      state.organisms.forEach(o => o.draw(mainCtx, colors));
+
+      // Current trail
+      drawTrail(mainCtx, colors);
+
+      // Mandala
+      drawMandala(mainCtx, colors);
+
+      // Resonances
+      drawResonances(mainCtx, colors);
+
+      mainCtx.restore();
+
+      // Glow layer (pulses)
+      glowCtx.clearRect(0, 0, W, H);
+      state.pulses.forEach(p => p.draw(glowCtx, colors));
+
+      // Auto-save periodically
+      saveTimer += dt;
+      if (saveTimer > 15000) {
+        saveState();
+        saveTimer = 0;
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    // ============ INIT ============
+    loadState();
+    loop();
+
+    window.addEventListener('beforeunload', saveState);
+
+    setTimeout(() => {
+      const overlay = document.querySelector('.load-overlay');
+      if (overlay) overlay.remove();
+    }, 4000);
+  </script>
+</body>
+</html>
