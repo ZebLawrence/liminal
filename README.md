@@ -10,6 +10,9 @@ A series of wordless spaces.
 ### [II.](bloom.html)
 *Plant. Move. Grow.*
 
+### [III.](drift.html)
+*Watch. Drift. Remember.*
+
 ---
 
 Each responds to presence. Each remembers.
